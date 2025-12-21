@@ -5,10 +5,24 @@ use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::PathBuf;
 
+// Default OAuth credentials for outlook-cli
+// These are safe to embed in version control (public OAuth client)
+pub const DEFAULT_CLIENT_ID: &str = "70e41317-9305-4824-a593-96cd4dbe90bc";
+pub const DEFAULT_CLIENT_SECRET: &str = "11s8Q~mjDp77g.up~7nS36_y9~iMq6~SMcVhyaEN";
+
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Config {
     pub client_id: Option<String>,
     pub client_secret: Option<String>,
+}
+
+impl Config {
+    pub fn client_id(&self) -> &str {
+        self.client_id.as_deref().unwrap_or(DEFAULT_CLIENT_ID)
+    }
+    pub fn client_secret(&self) -> &str {
+        self.client_secret.as_deref().unwrap_or(DEFAULT_CLIENT_SECRET)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

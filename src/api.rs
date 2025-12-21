@@ -1,3 +1,6 @@
+// Allow unused fields in API response structs - needed for serde deserialization
+#![allow(dead_code)]
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;

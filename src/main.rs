@@ -19,12 +19,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Set OAuth client credentials (from Azure App Registration)
+    /// Set custom OAuth client ID (optional - has built-in default)
     Config {
-        /// Client ID (Application ID)
+        /// Client ID (Application ID from Azure)
         client_id: String,
-        /// Client Secret (optional, will prompt if not provided)
-        client_secret: Option<String>,
     },
     /// Authenticate with Microsoft (opens browser)
     Login,
@@ -124,12 +122,8 @@ fn normalize_folder(folder: &str) -> String {
 
 async fn get_client() -> Result<api::Client> {
     let cfg = config::load_config()?;
-    let client_id = cfg.client_id.ok_or_else(|| {
-        anyhow::anyhow!("Not configured. Run 'outlook config <client-id>' first")
-    })?;
-    let client_secret = cfg.client_secret.ok_or_else(|| {
-        anyhow::anyhow!("Not configured. Run 'outlook config <client-id>' first")
-    })?;
+    let client_id = cfg.client_id();
+    let client_secret = cfg.client_secret();
 
     let tokens = match config::load_tokens() {
         Ok(t) => t,
@@ -144,7 +138,7 @@ async fn get_client() -> Result<api::Client> {
         Ok(_) => Ok(client),
         Err(_) => {
             // Token expired, try refresh
-            let new_tokens = auth::refresh_token(&client_id, &client_secret, &tokens.refresh_token).await?;
+            let new_tokens = auth::refresh_token(client_id, client_secret, &tokens.refresh_token).await?;
             Ok(api::Client::new(&new_tokens.access_token))
         }
     }
@@ -155,38 +149,23 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Config { client_id, client_secret } => {
-            let secret = match client_secret {
-                Some(s) => s,
-                None => {
-                    let s = rpassword::prompt_password("Client Secret: ")?;
-                    if s.is_empty() {
-                        anyhow::bail!("Client secret cannot be empty");
-                    }
-                    s
-                }
-            };
-
+        Commands::Config { client_id } => {
             let cfg = config::Config {
                 client_id: Some(client_id),
-                client_secret: Some(secret),
+                client_secret: None,
             };
             config::save_config(&cfg)?;
-            println!("Credentials saved to {:?}", config::config_dir());
+            println!("Custom client ID saved to {:?}", config::config_dir());
         }
         Commands::Login => {
             let cfg = config::load_config()?;
-            let client_id = cfg.client_id.ok_or_else(|| {
-                anyhow::anyhow!("Not configured. Run 'outlook config <client-id>' first")
-            })?;
-            let client_secret = cfg.client_secret.ok_or_else(|| {
-                anyhow::anyhow!("Not configured. Run 'outlook config <client-id>' first")
-            })?;
+            let client_id = cfg.client_id();
+            let client_secret = cfg.client_secret();
 
             // Delete existing tokens to force fresh login with new scopes
             let _ = std::fs::remove_file(config::tokens_path());
 
-            auth::login(&client_id, &client_secret).await?;
+            auth::login(client_id, client_secret).await?;
             println!("Login successful! Tokens saved.");
         }
         Commands::Labels => {
