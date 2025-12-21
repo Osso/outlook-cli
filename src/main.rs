@@ -30,6 +30,8 @@ enum Commands {
     Login,
     /// List categories (like Gmail labels)
     Labels,
+    /// Sync categories: create master categories for any used on messages
+    SyncLabels,
     /// List messages
     List {
         /// Maximum number of messages to show
@@ -78,6 +80,21 @@ enum Commands {
         id: String,
         /// Category to remove
         label: String,
+    },
+    /// Clear all categories from a message
+    ClearLabels {
+        /// Message ID (or "all" to clear from all inbox messages)
+        id: String,
+    },
+    /// Mark a message as read
+    MarkRead {
+        /// Message ID
+        id: String,
+    },
+    /// Mark a message as unread
+    MarkUnread {
+        /// Message ID
+        id: String,
     },
     /// Move a message to trash (Deleted Items)
     Delete {
@@ -192,6 +209,43 @@ async fn main() -> Result<()> {
                 println!("No categories found.");
             }
         }
+        Commands::SyncLabels => {
+            let client = get_client().await?;
+
+            // Get existing master categories
+            let master = client.list_categories().await?;
+            let master_names: std::collections::HashSet<String> = master.value
+                .unwrap_or_default()
+                .into_iter()
+                .map(|c| c.display_name.to_lowercase())
+                .collect();
+
+            // Scan messages for categories not in master list
+            let messages = client.list_messages("inbox", None, 200).await?;
+            let mut found: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+            if let Some(msgs) = messages.value {
+                for msg in msgs {
+                    if let Some(cats) = msg.categories {
+                        for cat in cats {
+                            if !master_names.contains(&cat.to_lowercase()) {
+                                found.insert(cat);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if found.is_empty() {
+                println!("All categories are already in master list.");
+            } else {
+                for cat in &found {
+                    client.create_category(cat, None).await?;
+                    println!("Created category: {}", cat);
+                }
+                println!("Synced {} categories.", found.len());
+            }
+        }
         Commands::List { max, query, label, unread } => {
             let client = get_client().await?;
             let folder = normalize_folder(&label);
@@ -290,6 +344,8 @@ async fn main() -> Result<()> {
         }
         Commands::Label { id, label } => {
             let client = get_client().await?;
+            // Ensure category exists in master list before applying
+            client.ensure_category(&label).await?;
             client.add_category(&id, &label).await?;
             println!("Added category {} to {}", label, id);
         }
@@ -297,6 +353,37 @@ async fn main() -> Result<()> {
             let client = get_client().await?;
             client.remove_category(&id, &label).await?;
             println!("Removed category {} from {}", label, id);
+        }
+        Commands::ClearLabels { id } => {
+            let client = get_client().await?;
+            if id == "all" {
+                // Clear categories from all messages with categories
+                let messages = client.list_messages("inbox", None, 200).await?;
+                let mut count = 0;
+                if let Some(msgs) = messages.value {
+                    for msg in msgs {
+                        if msg.categories.as_ref().map(|c| !c.is_empty()).unwrap_or(false) {
+                            client.update_categories(&msg.id, &[]).await?;
+                            println!("Cleared categories from: {}", msg.subject.as_deref().unwrap_or("(no subject)"));
+                            count += 1;
+                        }
+                    }
+                }
+                println!("Cleared categories from {} messages.", count);
+            } else {
+                client.update_categories(&id, &[]).await?;
+                println!("Cleared all categories from {}", id);
+            }
+        }
+        Commands::MarkRead { id } => {
+            let client = get_client().await?;
+            client.mark_read(&id).await?;
+            println!("Marked as read: {}", id);
+        }
+        Commands::MarkUnread { id } => {
+            let client = get_client().await?;
+            client.mark_unread(&id).await?;
+            println!("Marked as unread: {}", id);
         }
         Commands::Delete { id } => {
             let client = get_client().await?;

@@ -276,6 +276,29 @@ impl Client {
         self.get("/me/outlook/masterCategories").await
     }
 
+    // Create a master category
+    pub async fn create_category(&self, name: &str, color: Option<&str>) -> Result<Category> {
+        let body = serde_json::json!({
+            "displayName": name,
+            "color": color.unwrap_or("preset0")
+        });
+        self.post_json_with_response("/me/outlook/masterCategories", &body).await
+    }
+
+    // Ensure a category exists in master list, create if not
+    pub async fn ensure_category(&self, name: &str) -> Result<()> {
+        let categories = self.list_categories().await?;
+        let exists = categories.value
+            .as_ref()
+            .map(|cats| cats.iter().any(|c| c.display_name.eq_ignore_ascii_case(name)))
+            .unwrap_or(false);
+
+        if !exists {
+            self.create_category(name, None).await?;
+        }
+        Ok(())
+    }
+
     // List messages in a folder
     pub async fn list_messages(&self, folder: &str, filter: Option<&str>, max_results: u32) -> Result<MessageList> {
         let mut endpoint = format!(

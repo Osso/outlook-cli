@@ -67,11 +67,11 @@ async fn try_login(client_id: &str, client_secret: &str) -> Result<Tokens> {
         .authorize_url(CsrfToken::new_random)
         // Mail.ReadWrite for reading/moving/deleting messages
         // Mail.Send for potential future send support
-        // MailboxSettings.Read for categories
+        // MailboxSettings.ReadWrite for reading and creating categories
         // offline_access for refresh token
         .add_scope(Scope::new("Mail.ReadWrite".to_string()))
         .add_scope(Scope::new("Mail.Send".to_string()))
-        .add_scope(Scope::new("MailboxSettings.Read".to_string()))
+        .add_scope(Scope::new("MailboxSettings.ReadWrite".to_string()))
         .add_scope(Scope::new("offline_access".to_string()))
         .set_pkce_challenge(pkce_challenge)
         .url();
