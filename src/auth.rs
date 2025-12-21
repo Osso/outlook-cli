@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use oauth2::basic::BasicClient;
 use oauth2::{
-    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge,
+    AuthUrl, AuthorizationCode, ClientId, CsrfToken, PkceCodeChallenge,
     RedirectUrl, RefreshToken, Scope, TokenResponse, TokenUrl,
 };
 use std::io::{BufRead, BufReader, Write};
@@ -24,7 +24,7 @@ fn create_http_client() -> reqwest::Client {
         .expect("Client should build")
 }
 
-pub async fn login(client_id: &str, client_secret: &str) -> Result<Tokens> {
+pub async fn login(client_id: &str) -> Result<Tokens> {
     let mut last_error = None;
 
     for attempt in 0..LOGIN_MAX_RETRIES {
@@ -32,7 +32,7 @@ pub async fn login(client_id: &str, client_secret: &str) -> Result<Tokens> {
             eprintln!("Retrying login (attempt {}/{})...", attempt + 1, LOGIN_MAX_RETRIES);
         }
 
-        match try_login(client_id, client_secret).await {
+        match try_login(client_id).await {
             Ok(tokens) => return Ok(tokens),
             Err(e) => {
                 eprintln!("Login failed: {}", e);
@@ -44,7 +44,7 @@ pub async fn login(client_id: &str, client_secret: &str) -> Result<Tokens> {
     Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Login failed after {} attempts", LOGIN_MAX_RETRIES)))
 }
 
-async fn try_login(client_id: &str, client_secret: &str) -> Result<Tokens> {
+async fn try_login(client_id: &str) -> Result<Tokens> {
     // Bind to port 0 to get an OS-assigned available port (prevents port squatting)
     let listener = TcpListener::bind("127.0.0.1:0")
         .context("Failed to bind to local port")?;
@@ -53,8 +53,8 @@ async fn try_login(client_id: &str, client_secret: &str) -> Result<Tokens> {
     // Set timeout on listener so we don't wait forever
     listener.set_nonblocking(true)?;
 
+    // Public client - no client_secret needed, PKCE provides security
     let client = BasicClient::new(ClientId::new(client_id.to_string()))
-        .set_client_secret(ClientSecret::new(client_secret.to_string()))
         .set_auth_uri(AuthUrl::new(AUTH_URL.to_string())?)
         .set_token_uri(TokenUrl::new(TOKEN_URL.to_string())?)
         .set_redirect_uri(RedirectUrl::new(format!("http://localhost:{}", port))?);
@@ -166,9 +166,9 @@ fn wait_for_callback_with_timeout(
     Ok(code)
 }
 
-pub async fn refresh_token(client_id: &str, client_secret: &str, refresh: &str) -> Result<Tokens> {
+pub async fn refresh_token(client_id: &str, refresh: &str) -> Result<Tokens> {
+    // Public client - no client_secret needed
     let client = BasicClient::new(ClientId::new(client_id.to_string()))
-        .set_client_secret(ClientSecret::new(client_secret.to_string()))
         .set_auth_uri(AuthUrl::new(AUTH_URL.to_string())?)
         .set_token_uri(TokenUrl::new(TOKEN_URL.to_string())?);
 

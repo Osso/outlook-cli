@@ -123,7 +123,6 @@ fn normalize_folder(folder: &str) -> String {
 async fn get_client() -> Result<api::Client> {
     let cfg = config::load_config()?;
     let client_id = cfg.client_id();
-    let client_secret = cfg.client_secret();
 
     let tokens = match config::load_tokens() {
         Ok(t) => t,
@@ -138,7 +137,7 @@ async fn get_client() -> Result<api::Client> {
         Ok(_) => Ok(client),
         Err(_) => {
             // Token expired, try refresh
-            let new_tokens = auth::refresh_token(client_id, client_secret, &tokens.refresh_token).await?;
+            let new_tokens = auth::refresh_token(client_id, &tokens.refresh_token).await?;
             Ok(api::Client::new(&new_tokens.access_token))
         }
     }
@@ -152,7 +151,6 @@ async fn main() -> Result<()> {
         Commands::Config { client_id } => {
             let cfg = config::Config {
                 client_id: Some(client_id),
-                client_secret: None,
             };
             config::save_config(&cfg)?;
             println!("Custom client ID saved to {:?}", config::config_dir());
@@ -160,12 +158,11 @@ async fn main() -> Result<()> {
         Commands::Login => {
             let cfg = config::load_config()?;
             let client_id = cfg.client_id();
-            let client_secret = cfg.client_secret();
 
             // Delete existing tokens to force fresh login with new scopes
             let _ = std::fs::remove_file(config::tokens_path());
 
-            auth::login(client_id, client_secret).await?;
+            auth::login(client_id).await?;
             println!("Login successful! Tokens saved.");
         }
         Commands::Labels => {
