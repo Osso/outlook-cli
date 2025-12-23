@@ -25,7 +25,11 @@ enum Commands {
         client_id: String,
     },
     /// Authenticate with Microsoft (opens browser)
-    Login,
+    Login {
+        /// Use device code flow (for first-party app IDs that don't allow localhost redirect)
+        #[arg(long, short)]
+        device: bool,
+    },
     /// List categories (like Gmail labels)
     Labels,
     /// Sync categories: create master categories for any used on messages
@@ -155,14 +159,18 @@ async fn main() -> Result<()> {
             config::save_config(&cfg)?;
             println!("Custom client ID saved to {:?}", config::config_dir());
         }
-        Commands::Login => {
+        Commands::Login { device } => {
             let cfg = config::load_config()?;
             let client_id = cfg.client_id();
 
             // Delete existing tokens to force fresh login with new scopes
             let _ = std::fs::remove_file(config::tokens_path());
 
-            auth::login(client_id).await?;
+            if device {
+                auth::login_device_code(client_id).await?;
+            } else {
+                auth::login(client_id).await?;
+            }
             println!("Login successful! Tokens saved.");
         }
         Commands::Labels => {

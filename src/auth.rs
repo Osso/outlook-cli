@@ -1,9 +1,10 @@
 use anyhow::{Context, Result};
 use oauth2::basic::BasicClient;
 use oauth2::{
-    AuthUrl, AuthorizationCode, ClientId, CsrfToken, PkceCodeChallenge,
-    RedirectUrl, RefreshToken, Scope, TokenResponse, TokenUrl,
+    AuthUrl, AuthorizationCode, ClientId, CsrfToken, PkceCodeChallenge, RedirectUrl, RefreshToken,
+    Scope, TokenResponse, TokenUrl,
 };
+use serde::Deserialize;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::time::Duration;
@@ -14,8 +15,29 @@ use crate::config::{self, Tokens};
 // Microsoft identity platform endpoints (common = any Azure AD or personal Microsoft account)
 const AUTH_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
 const TOKEN_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+const DEVICE_CODE_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/devicecode";
 const LOGIN_MAX_RETRIES: u32 = 3;
 const CALLBACK_TIMEOUT_SECS: u64 = 120;
+
+#[derive(Deserialize)]
+struct DeviceCodeResponse {
+    device_code: String,
+    user_code: String,
+    verification_uri: String,
+    expires_in: u64,
+    interval: u64,
+}
+
+#[derive(Deserialize)]
+struct DeviceTokenResponse {
+    access_token: String,
+    refresh_token: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DeviceTokenError {
+    error: String,
+}
 
 fn create_http_client() -> reqwest::Client {
     reqwest::Client::builder()
@@ -29,7 +51,11 @@ pub async fn login(client_id: &str) -> Result<Tokens> {
 
     for attempt in 0..LOGIN_MAX_RETRIES {
         if attempt > 0 {
-            eprintln!("Retrying login (attempt {}/{})...", attempt + 1, LOGIN_MAX_RETRIES);
+            eprintln!(
+                "Retrying login (attempt {}/{})...",
+                attempt + 1,
+                LOGIN_MAX_RETRIES
+            );
         }
 
         match try_login(client_id).await {
@@ -41,13 +67,13 @@ pub async fn login(client_id: &str) -> Result<Tokens> {
         }
     }
 
-    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Login failed after {} attempts", LOGIN_MAX_RETRIES)))
+    Err(last_error
+        .unwrap_or_else(|| anyhow::anyhow!("Login failed after {} attempts", LOGIN_MAX_RETRIES)))
 }
 
 async fn try_login(client_id: &str) -> Result<Tokens> {
     // Bind to port 0 to get an OS-assigned available port (prevents port squatting)
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .context("Failed to bind to local port")?;
+    let listener = TcpListener::bind("127.0.0.1:0").context("Failed to bind to local port")?;
     let port = listener.local_addr()?.port();
 
     // Set timeout on listener so we don't wait forever
@@ -190,4 +216,77 @@ pub async fn refresh_token(client_id: &str, refresh: &str) -> Result<Tokens> {
 
     config::save_tokens(&tokens)?;
     Ok(tokens)
+}
+
+/// Device code flow - works with first-party Microsoft app IDs without redirect URI
+pub async fn login_device_code(client_id: &str) -> Result<Tokens> {
+    let http_client = create_http_client();
+    let scopes = "Mail.ReadWrite Mail.Send MailboxSettings.ReadWrite offline_access";
+
+    // Step 1: Request device code
+    let device_response = http_client
+        .post(DEVICE_CODE_URL)
+        .form(&[("client_id", client_id), ("scope", scopes)])
+        .send()
+        .await
+        .context("Failed to request device code")?
+        .json::<DeviceCodeResponse>()
+        .await
+        .context("Failed to parse device code response")?;
+
+    println!("\nTo sign in, open: {}", device_response.verification_uri);
+    println!("Enter code: {}\n", device_response.user_code);
+
+    // Try to open browser
+    let _ = open::that(&device_response.verification_uri);
+
+    // Step 2: Poll for token
+    let deadline = std::time::Instant::now() + Duration::from_secs(device_response.expires_in);
+    let interval = Duration::from_secs(device_response.interval);
+
+    loop {
+        if std::time::Instant::now() >= deadline {
+            anyhow::bail!("Device code expired");
+        }
+
+        tokio::time::sleep(interval).await;
+
+        let response = http_client
+            .post(TOKEN_URL)
+            .form(&[
+                ("client_id", client_id),
+                ("device_code", &device_response.device_code),
+                ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+            ])
+            .send()
+            .await
+            .context("Failed to poll for token")?;
+
+        let body = response.text().await?;
+
+        // Try to parse as success
+        if let Ok(token_response) = serde_json::from_str::<DeviceTokenResponse>(&body) {
+            let tokens = Tokens {
+                access_token: token_response.access_token,
+                refresh_token: token_response
+                    .refresh_token
+                    .ok_or_else(|| anyhow::anyhow!("No refresh token received"))?,
+            };
+            config::save_tokens(&tokens)?;
+            println!("Authentication successful!");
+            return Ok(tokens);
+        }
+
+        // Check if still pending
+        if let Ok(error) = serde_json::from_str::<DeviceTokenError>(&body) {
+            match error.error.as_str() {
+                "authorization_pending" => continue,
+                "slow_down" => {
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    continue;
+                }
+                _ => anyhow::bail!("Authentication failed: {}", error.error),
+            }
+        }
+    }
 }
