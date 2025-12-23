@@ -5,8 +5,8 @@ use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::PathBuf;
 
-// Default OAuth client ID for outlook-cli (public client, no secret needed with PKCE)
-pub const DEFAULT_CLIENT_ID: &str = "70e41317-9305-4824-a593-96cd4dbe90bc";
+// Microsoft Graph CLI public client ID - works with localhost redirect + PKCE
+pub const DEFAULT_CLIENT_ID: &str = "14d82eec-204b-4c2f-b7e8-296a70dab67e";
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Config {
