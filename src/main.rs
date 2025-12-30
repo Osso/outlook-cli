@@ -198,7 +198,8 @@ async fn main() -> Result<()> {
 
             // Get existing master categories
             let master = client.list_categories().await?;
-            let master_names: std::collections::HashSet<String> = master.value
+            let master_names: std::collections::HashSet<String> = master
+                .value
                 .unwrap_or_default()
                 .into_iter()
                 .map(|c| c.display_name.to_lowercase())
@@ -230,7 +231,12 @@ async fn main() -> Result<()> {
                 println!("Synced {} categories.", found.len());
             }
         }
-        Commands::List { max, query, label, unread } => {
+        Commands::List {
+            max,
+            query,
+            label,
+            unread,
+        } => {
             let client = get_client().await?;
             let folder = normalize_folder(&label);
 
@@ -249,17 +255,20 @@ async fn main() -> Result<()> {
 
             if let Some(messages) = list.value {
                 if cli.json {
-                    let items: Vec<_> = messages.iter().map(|msg| {
-                        serde_json::json!({
-                            "id": msg.id,
-                            "from": msg.get_from(),
-                            "subject": msg.subject,
-                            "date": msg.received_date_time,
-                            "snippet": msg.body_preview,
-                            "isRead": msg.is_read,
-                            "categories": msg.categories,
+                    let items: Vec<_> = messages
+                        .iter()
+                        .map(|msg| {
+                            serde_json::json!({
+                                "id": msg.id,
+                                "from": msg.get_from(),
+                                "subject": msg.subject,
+                                "date": msg.received_date_time,
+                                "snippet": msg.body_preview,
+                                "isRead": msg.is_read,
+                                "categories": msg.categories,
+                            })
                         })
-                    }).collect();
+                        .collect();
                     println!("{}", serde_json::to_string(&items)?);
                 } else {
                     for msg in messages {
@@ -279,22 +288,37 @@ async fn main() -> Result<()> {
             let msg = client.get_message(&id).await?;
 
             if cli.json {
-                println!("{}", serde_json::to_string(&serde_json::json!({
-                    "id": msg.id,
-                    "from": msg.get_from(),
-                    "to": msg.get_to(),
-                    "subject": msg.subject,
-                    "date": msg.received_date_time,
-                    "body": msg.get_body_text(),
-                    "snippet": msg.body_preview,
-                    "isRead": msg.is_read,
-                    "categories": msg.categories,
-                }))?);
+                println!(
+                    "{}",
+                    serde_json::to_string(&serde_json::json!({
+                        "id": msg.id,
+                        "from": msg.get_from(),
+                        "to": msg.get_to(),
+                        "subject": msg.subject,
+                        "date": msg.received_date_time,
+                        "body": msg.get_body_text(),
+                        "snippet": msg.body_preview,
+                        "isRead": msg.is_read,
+                        "categories": msg.categories,
+                    }))?
+                );
             } else {
-                println!("From: {}", msg.get_from().unwrap_or_else(|| "Unknown".to_string()));
-                println!("To: {}", msg.get_to().unwrap_or_else(|| "Unknown".to_string()));
-                println!("Subject: {}", msg.subject.as_deref().unwrap_or("(no subject)"));
-                println!("Date: {}", msg.received_date_time.as_deref().unwrap_or("Unknown"));
+                println!(
+                    "From: {}",
+                    msg.get_from().unwrap_or_else(|| "Unknown".to_string())
+                );
+                println!(
+                    "To: {}",
+                    msg.get_to().unwrap_or_else(|| "Unknown".to_string())
+                );
+                println!(
+                    "Subject: {}",
+                    msg.subject.as_deref().unwrap_or("(no subject)")
+                );
+                println!(
+                    "Date: {}",
+                    msg.received_date_time.as_deref().unwrap_or("Unknown")
+                );
                 println!("---");
 
                 if let Some(body) = msg.get_body_text() {
@@ -346,9 +370,17 @@ async fn main() -> Result<()> {
                 let mut count = 0;
                 if let Some(msgs) = messages.value {
                     for msg in msgs {
-                        if msg.categories.as_ref().map(|c| !c.is_empty()).unwrap_or(false) {
+                        if msg
+                            .categories
+                            .as_ref()
+                            .map(|c| !c.is_empty())
+                            .unwrap_or(false)
+                        {
                             client.update_categories(&msg.id, &[]).await?;
-                            println!("Cleared categories from: {}", msg.subject.as_deref().unwrap_or("(no subject)"));
+                            println!(
+                                "Cleared categories from: {}",
+                                msg.subject.as_deref().unwrap_or("(no subject)")
+                            );
                             count += 1;
                         }
                     }

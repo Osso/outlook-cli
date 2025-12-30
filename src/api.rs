@@ -189,12 +189,7 @@ impl Client {
         let url = format!("{}{}", BASE_URL, endpoint);
 
         let resp = self
-            .execute_with_retry(|| {
-                self.http
-                    .get(&url)
-                    .bearer_auth(&self.access_token)
-                    .send()
-            })
+            .execute_with_retry(|| self.http.get(&url).bearer_auth(&self.access_token).send())
             .await?;
 
         resp.json().await.context("Failed to parse JSON response")
@@ -203,13 +198,8 @@ impl Client {
     async fn post(&self, endpoint: &str) -> Result<()> {
         let url = format!("{}{}", BASE_URL, endpoint);
 
-        self.execute_with_retry(|| {
-            self.http
-                .post(&url)
-                .bearer_auth(&self.access_token)
-                .send()
-        })
-        .await?;
+        self.execute_with_retry(|| self.http.post(&url).bearer_auth(&self.access_token).send())
+            .await?;
 
         Ok(())
     }
@@ -271,7 +261,11 @@ impl Client {
 
     // Get folder by well-known name or ID
     pub async fn get_folder(&self, name_or_id: &str) -> Result<Folder> {
-        self.get(&format!("/me/mailFolders/{}", urlencoding::encode(name_or_id))).await
+        self.get(&format!(
+            "/me/mailFolders/{}",
+            urlencoding::encode(name_or_id)
+        ))
+        .await
     }
 
     // List categories (Outlook master categories)
@@ -285,15 +279,20 @@ impl Client {
             "displayName": name,
             "color": color.unwrap_or("preset0")
         });
-        self.post_json_with_response("/me/outlook/masterCategories", &body).await
+        self.post_json_with_response("/me/outlook/masterCategories", &body)
+            .await
     }
 
     // Ensure a category exists in master list, create if not
     pub async fn ensure_category(&self, name: &str) -> Result<()> {
         let categories = self.list_categories().await?;
-        let exists = categories.value
+        let exists = categories
+            .value
             .as_ref()
-            .map(|cats| cats.iter().any(|c| c.display_name.eq_ignore_ascii_case(name)))
+            .map(|cats| {
+                cats.iter()
+                    .any(|c| c.display_name.eq_ignore_ascii_case(name))
+            })
             .unwrap_or(false);
 
         if !exists {
@@ -303,7 +302,12 @@ impl Client {
     }
 
     // List messages in a folder
-    pub async fn list_messages(&self, folder: &str, filter: Option<&str>, max_results: u32) -> Result<MessageList> {
+    pub async fn list_messages(
+        &self,
+        folder: &str,
+        filter: Option<&str>,
+        max_results: u32,
+    ) -> Result<MessageList> {
         let mut endpoint = format!(
             "/me/mailFolders/{}/messages?$top={}&$select=id,subject,from,receivedDateTime,bodyPreview,isRead,categories",
             urlencoding::encode(folder),
@@ -343,7 +347,8 @@ impl Client {
         self.post_json_with_response(
             &format!("/me/messages/{}/move", urlencoding::encode(id)),
             &body,
-        ).await
+        )
+        .await
     }
 
     // Archive message (move to archive folder)
@@ -375,7 +380,8 @@ impl Client {
         let body = serde_json::json!({
             "categories": categories
         });
-        self.patch_json(&format!("/me/messages/{}", urlencoding::encode(id)), &body).await
+        self.patch_json(&format!("/me/messages/{}", urlencoding::encode(id)), &body)
+            .await
     }
 
     // Add a category to a message
@@ -404,13 +410,15 @@ impl Client {
     // Mark message as read
     pub async fn mark_read(&self, id: &str) -> Result<()> {
         let body = serde_json::json!({ "isRead": true });
-        self.patch_json(&format!("/me/messages/{}", urlencoding::encode(id)), &body).await
+        self.patch_json(&format!("/me/messages/{}", urlencoding::encode(id)), &body)
+            .await
     }
 
     // Mark message as unread
     pub async fn mark_unread(&self, id: &str) -> Result<()> {
         let body = serde_json::json!({ "isRead": false });
-        self.patch_json(&format!("/me/messages/{}", urlencoding::encode(id)), &body).await
+        self.patch_json(&format!("/me/messages/{}", urlencoding::encode(id)), &body)
+            .await
     }
 }
 
@@ -440,7 +448,9 @@ impl Message {
     }
 
     pub fn get_header(&self, name: &str) -> Option<&str> {
-        self.internet_message_headers.as_ref()?.iter()
+        self.internet_message_headers
+            .as_ref()?
+            .iter()
             .find(|h| h.name.eq_ignore_ascii_case(name))
             .map(|h| h.value.as_str())
     }
@@ -452,7 +462,7 @@ impl Message {
         for part in header.split(',') {
             let part = part.trim();
             if part.starts_with('<') && part.ends_with('>') {
-                let url = &part[1..part.len()-1];
+                let url = &part[1..part.len() - 1];
                 if url.starts_with("http://") || url.starts_with("https://") {
                     return Some(url.to_string());
                 }
@@ -462,7 +472,7 @@ impl Message {
         for part in header.split(',') {
             let part = part.trim();
             if part.starts_with('<') && part.ends_with('>') {
-                return Some(part[1..part.len()-1].to_string());
+                return Some(part[1..part.len() - 1].to_string());
             }
         }
         None
@@ -500,7 +510,10 @@ mod tests {
             }),
             None,
         );
-        assert_eq!(msg.get_from(), Some("John Doe <john@example.com>".to_string()));
+        assert_eq!(
+            msg.get_from(),
+            Some("John Doe <john@example.com>".to_string())
+        );
     }
 
     #[test]
@@ -532,24 +545,26 @@ mod tests {
     #[test]
     fn test_get_unsubscribe_url() {
         let mut msg = make_message(None, None);
-        msg.internet_message_headers = Some(vec![
-            InternetMessageHeader {
-                name: "List-Unsubscribe".to_string(),
-                value: "<mailto:unsub@example.com>, <https://example.com/unsub>".to_string(),
-            },
-        ]);
-        assert_eq!(msg.get_unsubscribe_url(), Some("https://example.com/unsub".to_string()));
+        msg.internet_message_headers = Some(vec![InternetMessageHeader {
+            name: "List-Unsubscribe".to_string(),
+            value: "<mailto:unsub@example.com>, <https://example.com/unsub>".to_string(),
+        }]);
+        assert_eq!(
+            msg.get_unsubscribe_url(),
+            Some("https://example.com/unsub".to_string())
+        );
     }
 
     #[test]
     fn test_get_unsubscribe_url_mailto_only() {
         let mut msg = make_message(None, None);
-        msg.internet_message_headers = Some(vec![
-            InternetMessageHeader {
-                name: "List-Unsubscribe".to_string(),
-                value: "<mailto:unsub@example.com>".to_string(),
-            },
-        ]);
-        assert_eq!(msg.get_unsubscribe_url(), Some("mailto:unsub@example.com".to_string()));
+        msg.internet_message_headers = Some(vec![InternetMessageHeader {
+            name: "List-Unsubscribe".to_string(),
+            value: "<mailto:unsub@example.com>".to_string(),
+        }]);
+        assert_eq!(
+            msg.get_unsubscribe_url(),
+            Some("mailto:unsub@example.com".to_string())
+        );
     }
 }
