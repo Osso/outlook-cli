@@ -204,18 +204,25 @@ impl Client {
         Ok(())
     }
 
-    async fn post_json<T: Serialize + Sync>(&self, endpoint: &str, body: &T) -> Result<()> {
+    async fn send_json<T: Serialize + Sync>(
+        &self,
+        method: reqwest::Method,
+        endpoint: &str,
+        body: &T,
+    ) -> Result<reqwest::Response> {
         let url = format!("{}{}", BASE_URL, endpoint);
-
         self.execute_with_retry(|| {
             self.http
-                .post(&url)
+                .request(method.clone(), &url)
                 .bearer_auth(&self.access_token)
                 .json(body)
                 .send()
         })
-        .await?;
+        .await
+    }
 
+    async fn post_json<T: Serialize + Sync>(&self, endpoint: &str, body: &T) -> Result<()> {
+        self.send_json(reqwest::Method::POST, endpoint, body).await?;
         Ok(())
     }
 
@@ -224,33 +231,15 @@ impl Client {
         endpoint: &str,
         body: &T,
     ) -> Result<R> {
-        let url = format!("{}{}", BASE_URL, endpoint);
-
-        let resp = self
-            .execute_with_retry(|| {
-                self.http
-                    .post(&url)
-                    .bearer_auth(&self.access_token)
-                    .json(body)
-                    .send()
-            })
-            .await?;
-
-        resp.json().await.context("Failed to parse JSON response")
+        self.send_json(reqwest::Method::POST, endpoint, body)
+            .await?
+            .json()
+            .await
+            .context("Failed to parse JSON response")
     }
 
     async fn patch_json<T: Serialize + Sync>(&self, endpoint: &str, body: &T) -> Result<()> {
-        let url = format!("{}{}", BASE_URL, endpoint);
-
-        self.execute_with_retry(|| {
-            self.http
-                .patch(&url)
-                .bearer_auth(&self.access_token)
-                .json(body)
-                .send()
-        })
-        .await?;
-
+        self.send_json(reqwest::Method::PATCH, endpoint, body).await?;
         Ok(())
     }
 
