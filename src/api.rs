@@ -222,7 +222,8 @@ impl Client {
     }
 
     async fn post_json<T: Serialize + Sync>(&self, endpoint: &str, body: &T) -> Result<()> {
-        self.send_json(reqwest::Method::POST, endpoint, body).await?;
+        self.send_json(reqwest::Method::POST, endpoint, body)
+            .await?;
         Ok(())
     }
 
@@ -239,7 +240,8 @@ impl Client {
     }
 
     async fn patch_json<T: Serialize + Sync>(&self, endpoint: &str, body: &T) -> Result<()> {
-        self.send_json(reqwest::Method::PATCH, endpoint, body).await?;
+        self.send_json(reqwest::Method::PATCH, endpoint, body)
+            .await?;
         Ok(())
     }
 

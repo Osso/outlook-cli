@@ -227,7 +227,13 @@ async fn sync_labels() -> Result<()> {
     Ok(())
 }
 
-async fn list_messages(max: u32, query: Option<String>, label: String, unread: bool, json: bool) -> Result<()> {
+async fn list_messages(
+    max: u32,
+    query: Option<String>,
+    label: String,
+    unread: bool,
+    json: bool,
+) -> Result<()> {
     let client = get_client().await?;
     let folder = normalize_folder(&label);
 
@@ -436,7 +442,12 @@ async fn main() -> Result<()> {
         Commands::Login { device } => login(device).await?,
         Commands::Labels => list_labels(cli.json).await?,
         Commands::SyncLabels => sync_labels().await?,
-        Commands::List { max, query, label, unread } => list_messages(max, query, label, unread, cli.json).await?,
+        Commands::List {
+            max,
+            query,
+            label,
+            unread,
+        } => list_messages(max, query, label, unread, cli.json).await?,
         Commands::Read { id } => read_message(id, cli.json).await?,
         Commands::Archive { id } => archive_message(id).await?,
         Commands::Spam { id } => spam_message(id).await?,
