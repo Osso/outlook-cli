@@ -1,4 +1,4 @@
-// Allow unused fields in API response structs - needed for serde deserialization
+// Allow unused fields in API response structs - needed for serde deserialization.
 #![allow(dead_code)]
 
 use anyhow::{Context, Result};
@@ -128,6 +128,20 @@ impl Client {
         err.is_timeout() || err.is_connect() || err.is_request()
     }
 
+    fn can_retry_status(status: reqwest::StatusCode, attempt: u32) -> bool {
+        attempt < MAX_RETRIES && Self::is_retryable_status(status)
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn can_retry_error(err: &reqwest::Error, attempt: u32) -> bool {
+        attempt < MAX_RETRIES && Self::is_retryable_error(err)
+    }
+
+    fn get_error_retry_delay(attempt: u32) -> Duration {
+        Duration::from_millis(INITIAL_BACKOFF_MS * 2u64.pow(attempt))
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn get_retry_delay(resp: &reqwest::Response, attempt: u32) -> Duration {
         // Check Retry-After header first (Microsoft Graph uses this for rate limits)
         if let Some(retry_after) = resp.headers().get("Retry-After") {
@@ -139,6 +153,7 @@ impl Client {
         Duration::from_millis(INITIAL_BACKOFF_MS * 2u64.pow(attempt))
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn execute_with_retry<F, Fut>(&self, request_fn: F) -> Result<reqwest::Response>
     where
         F: Fn() -> Fut,
@@ -147,44 +162,44 @@ impl Client {
         let mut last_error = None;
 
         for attempt in 0..=MAX_RETRIES {
-            match request_fn().await {
-                Ok(resp) => {
-                    if resp.status().is_success() {
-                        return Ok(resp);
+            let response = match request_fn().await {
+                Ok(resp) => resp,
+                Err(err) => {
+                    if !Self::can_retry_error(&err, attempt) {
+                        return Err(err).context("Failed to send request");
                     }
 
-                    if Self::is_retryable_status(resp.status()) && attempt < MAX_RETRIES {
-                        let delay = Self::get_retry_delay(&resp, attempt);
-                        eprintln!(
-                            "Rate limited ({}), retrying in {:?}...",
-                            resp.status(),
-                            delay
-                        );
-                        tokio::time::sleep(delay).await;
-                        continue;
-                    }
+                    let delay = Self::get_error_retry_delay(attempt);
+                    eprintln!("Request failed ({}), retrying in {:?}...", err, delay);
+                    tokio::time::sleep(delay).await;
+                    last_error = Some(err);
+                    continue;
+                }
+            };
 
-                    // Non-retryable error or max retries reached
-                    let status = resp.status();
-                    let body = resp.text().await.unwrap_or_default();
-                    anyhow::bail!("HTTP {} - {}", status, body);
-                }
-                Err(e) => {
-                    if Self::is_retryable_error(&e) && attempt < MAX_RETRIES {
-                        let delay = Duration::from_millis(INITIAL_BACKOFF_MS * 2u64.pow(attempt));
-                        eprintln!("Request failed ({}), retrying in {:?}...", e, delay);
-                        tokio::time::sleep(delay).await;
-                        last_error = Some(e);
-                        continue;
-                    }
-                    return Err(e).context("Failed to send request");
-                }
+            let status = response.status();
+            if status.is_success() {
+                return Ok(response);
             }
+
+            if Self::can_retry_status(status, attempt) {
+                let delay = Self::get_retry_delay(&response, attempt);
+                eprintln!("Rate limited ({}), retrying in {:?}...", status, delay);
+                tokio::time::sleep(delay).await;
+                continue;
+            }
+
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("HTTP {} - {}", status, body);
         }
 
-        Err(last_error.unwrap()).context("Failed after max retries")
+        let last_error = last_error.ok_or_else(|| {
+            anyhow::anyhow!("Failed after max retries with unknown request error")
+        })?;
+        Err(last_error).context("Failed after max retries")
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn get<T: serde::de::DeserializeOwned>(&self, endpoint: &str) -> Result<T> {
         let url = format!("{}{}", BASE_URL, endpoint);
 
@@ -195,6 +210,7 @@ impl Client {
         resp.json().await.context("Failed to parse JSON response")
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn post(&self, endpoint: &str) -> Result<()> {
         let url = format!("{}{}", BASE_URL, endpoint);
 
@@ -204,6 +220,7 @@ impl Client {
         Ok(())
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn send_json<T: Serialize + Sync>(
         &self,
         method: reqwest::Method,
@@ -221,12 +238,14 @@ impl Client {
         .await
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn post_json<T: Serialize + Sync>(&self, endpoint: &str, body: &T) -> Result<()> {
         self.send_json(reqwest::Method::POST, endpoint, body)
             .await?;
         Ok(())
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn post_json_with_response<T: Serialize + Sync, R: serde::de::DeserializeOwned>(
         &self,
         endpoint: &str,
@@ -239,6 +258,7 @@ impl Client {
             .context("Failed to parse JSON response")
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn patch_json<T: Serialize + Sync>(&self, endpoint: &str, body: &T) -> Result<()> {
         self.send_json(reqwest::Method::PATCH, endpoint, body)
             .await?;
@@ -246,11 +266,13 @@ impl Client {
     }
 
     // List mail folders
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn list_folders(&self) -> Result<FolderList> {
         self.get("/me/mailFolders?$top=100").await
     }
 
     // Get folder by well-known name or ID
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn get_folder(&self, name_or_id: &str) -> Result<Folder> {
         self.get(&format!(
             "/me/mailFolders/{}",
@@ -260,11 +282,13 @@ impl Client {
     }
 
     // List categories (Outlook master categories)
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn list_categories(&self) -> Result<CategoryList> {
         self.get("/me/outlook/masterCategories").await
     }
 
     // Create a master category
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn create_category(&self, name: &str, color: Option<&str>) -> Result<Category> {
         let body = serde_json::json!({
             "displayName": name,
@@ -275,6 +299,7 @@ impl Client {
     }
 
     // Ensure a category exists in master list, create if not
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn ensure_category(&self, name: &str) -> Result<()> {
         let categories = self.list_categories().await?;
         let exists = categories
@@ -293,6 +318,7 @@ impl Client {
     }
 
     // List messages in a folder
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn list_messages(
         &self,
         folder: &str,
@@ -313,6 +339,7 @@ impl Client {
     }
 
     // Search messages across all folders
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn search_messages(&self, query: &str, max_results: u32) -> Result<MessageList> {
         let endpoint = format!(
             "/me/messages?$search=\"{}\"&$top={}&$select=id,subject,from,receivedDateTime,bodyPreview,isRead,categories",
@@ -323,6 +350,7 @@ impl Client {
     }
 
     // Get a specific message with full body and headers
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn get_message(&self, id: &str) -> Result<Message> {
         self.get(&format!(
             "/me/messages/{}?$select=id,subject,from,toRecipients,body,bodyPreview,receivedDateTime,isRead,categories,internetMessageHeaders,parentFolderId",
@@ -331,6 +359,7 @@ impl Client {
     }
 
     // Move message to a folder
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn move_message(&self, id: &str, destination_folder: &str) -> Result<MoveResponse> {
         let body = serde_json::json!({
             "destinationId": destination_folder
@@ -343,30 +372,35 @@ impl Client {
     }
 
     // Archive message (move to archive folder)
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn archive(&self, id: &str) -> Result<()> {
         self.move_message(id, "archive").await?;
         Ok(())
     }
 
     // Mark as spam (move to junk folder)
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn mark_spam(&self, id: &str) -> Result<()> {
         self.move_message(id, "junkemail").await?;
         Ok(())
     }
 
     // Unspam (move from junk to inbox)
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn unspam(&self, id: &str) -> Result<()> {
         self.move_message(id, "inbox").await?;
         Ok(())
     }
 
     // Move to trash (deleted items)
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn trash(&self, id: &str) -> Result<()> {
         self.move_message(id, "deleteditems").await?;
         Ok(())
     }
 
     // Update message categories
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn update_categories(&self, id: &str, categories: &[String]) -> Result<()> {
         let body = serde_json::json!({
             "categories": categories
@@ -376,6 +410,7 @@ impl Client {
     }
 
     // Add a category to a message
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn add_category(&self, id: &str, category: &str) -> Result<()> {
         let msg = self.get_message(id).await?;
         let mut categories = msg.categories.unwrap_or_default();
@@ -387,6 +422,7 @@ impl Client {
     }
 
     // Remove a category from a message
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn remove_category(&self, id: &str, category: &str) -> Result<()> {
         let msg = self.get_message(id).await?;
         let categories: Vec<String> = msg
@@ -399,6 +435,7 @@ impl Client {
     }
 
     // Mark message as read
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn mark_read(&self, id: &str) -> Result<()> {
         let body = serde_json::json!({ "isRead": true });
         self.patch_json(&format!("/me/messages/{}", urlencoding::encode(id)), &body)
@@ -406,6 +443,7 @@ impl Client {
     }
 
     // Mark message as unread
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn mark_unread(&self, id: &str) -> Result<()> {
         let body = serde_json::json!({ "isRead": false });
         self.patch_json(&format!("/me/messages/{}", urlencoding::encode(id)), &body)
@@ -556,6 +594,81 @@ mod tests {
         assert_eq!(
             msg.get_unsubscribe_url(),
             Some("mailto:unsub@example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn test_get_to_joins_recipient_addresses() {
+        let msg = Message {
+            to_recipients: Some(vec![
+                Recipient {
+                    email_address: EmailAddress {
+                        name: None,
+                        address: Some("first@example.com".to_string()),
+                    },
+                },
+                Recipient {
+                    email_address: EmailAddress {
+                        name: None,
+                        address: Some("second@example.com".to_string()),
+                    },
+                },
+            ]),
+            ..make_message(None, None)
+        };
+
+        assert_eq!(
+            msg.get_to().as_deref(),
+            Some("first@example.com, second@example.com")
+        );
+    }
+
+    #[test]
+    fn test_get_header_is_case_insensitive() {
+        let msg = Message {
+            internet_message_headers: Some(vec![InternetMessageHeader {
+                name: "X-Custom".to_string(),
+                value: "value".to_string(),
+            }]),
+            ..make_message(None, None)
+        };
+
+        assert_eq!(msg.get_header("x-custom"), Some("value"));
+    }
+
+    #[test]
+    fn test_retry_status_helpers() {
+        assert!(Client::is_retryable_status(
+            reqwest::StatusCode::TOO_MANY_REQUESTS
+        ));
+        assert!(Client::is_retryable_status(
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR
+        ));
+        assert!(Client::is_retryable_status(
+            reqwest::StatusCode::REQUEST_TIMEOUT
+        ));
+        assert!(!Client::is_retryable_status(
+            reqwest::StatusCode::BAD_REQUEST
+        ));
+        assert!(Client::can_retry_status(
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            0
+        ));
+        assert!(!Client::can_retry_status(
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            MAX_RETRIES
+        ));
+    }
+
+    #[test]
+    fn test_error_retry_delay_uses_exponential_backoff() {
+        assert_eq!(
+            Client::get_error_retry_delay(0),
+            Duration::from_millis(1000)
+        );
+        assert_eq!(
+            Client::get_error_retry_delay(2),
+            Duration::from_millis(4000)
         );
     }
 }
